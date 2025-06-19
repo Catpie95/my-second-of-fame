@@ -8,19 +8,20 @@ const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'Il Mio Secondo di Fama',
-  description: 'Vendi secondi di un video YouTube che gira 24/7 - Ogni secondo costa €1',
-  keywords: ['video', 'fama', 'youtube', 'viral', 'secondi', 'fame'],
+  description: 'Vendi secondi di un video che gira 24/7',
 }
 
 export default function RootLayout({
   children,
+  params: { lang },
 }: {
   children: React.ReactNode
+  params: { lang: string }
 }) {
   return (
-    <html lang="it">
-      <body className={inter.className}>
-        <LanguageProvider>
+    <html lang={lang}>
+      <body className={`${inter.className} bg-black text-white`}>
+        <LanguageProvider lang={lang}>
           <VideoProvider>
             {children}
           </VideoProvider>
