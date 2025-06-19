@@ -1,0 +1,19 @@
+{
+  "videos": [
+    {
+      "id": "1750374438641",
+      "url": "/videos/1750374438641-4224DCAE-53B4-4520-A6FC-FCD69E05ABCF.mp4",
+      "duration": 6,
+      "uploadedAt": "2025-06-19T23:07:18.643Z",
+      "schedule": {
+        "days": [
+          "friday"
+        ],
+        "startTime": "01:08",
+        "endTime": "01:08",
+        "timezone": "Europe/Rome"
+      },
+      "isActive": true
+    }
+  ]
+}
