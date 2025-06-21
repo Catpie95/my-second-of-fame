@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { put } from '@vercel/blob'
 import { kv } from '@vercel/kv'
+import { NextRequest, NextResponse } from 'next/server'
 
 interface VideoData {
   id: string
@@ -16,61 +17,54 @@ interface VideoData {
 }
 
 export async function POST(request: NextRequest) {
+  const { searchParams } = new URL(request.url)
+  const filename = searchParams.get('filename')
+  const scheduleData = searchParams.get('schedule')
+
+  if (!filename || !request.body) {
+    return NextResponse.json(
+      { error: 'Nome del file o corpo della richiesta mancanti' },
+      { status: 400 }
+    )
+  }
+
+  if (!scheduleData) {
+    return NextResponse.json(
+      { error: 'Dati di programmazione mancanti' },
+      { status: 400 }
+    )
+  }
+
   try {
-    const formData = await request.formData()
-    const video = formData.get('video') as File
-    const scheduleData = formData.get('schedule') as string
-    
-    if (!video) {
-      return NextResponse.json(
-        { error: 'Nessun video caricato' },
-        { status: 400 }
-      )
-    }
-
-    if (!scheduleData) {
-      return NextResponse.json(
-        { error: 'Dati di programmazione mancanti' },
-        { status: 400 }
-      )
-    }
-
     const schedule = JSON.parse(scheduleData)
-
-    // Per ora, simuliamo il salvataggio del video
-    // In produzione, useresti un servizio come Cloudinary o AWS S3
-    const videoId = Date.now().toString()
-    const filename = `${videoId}-${video.name}`
     
-    // Calcola la durata del video (approssimativa)
-    const duration = Math.ceil(video.size / (1024 * 1024)) // Approssimazione basata sulla dimensione
-
-    // Salva i dati nel database Vercel KV
-    const newVideo: VideoData = {
-      id: videoId,
-      url: `/videos/${filename}`, // In produzione, questo sarebbe l'URL del CDN
-      duration,
-      uploadedAt: new Date().toISOString(),
-      schedule,
-      isActive: true
-    }
-
-    // Salva nel database KV
-    await kv.hset('videos', { [videoId]: JSON.stringify(newVideo) })
-
-    // Restituisci il path relativo del video
-    return NextResponse.json({ 
-      success: true,
-      videoPath: `/videos/${filename}`,
-      videoId,
-      duration,
-      schedule
+    // 1. Carica il video su Vercel Blob
+    const blob = await put(filename, request.body, {
+      access: 'public',
+      contentType: 'video/mp4', // Assicurati che il content-type sia corretto
     })
 
+    // 2. Salva i metadati su Vercel KV
+    const videoId = blob.pathname
+    const newVideo: VideoData = {
+      id: videoId,
+      url: blob.url, // Usiamo l'URL restituito da Vercel Blob
+      duration: 0, // La durata andrebbe estratta, per ora la lasciamo a 0
+      uploadedAt: new Date().toISOString(),
+      schedule,
+      isActive: true,
+    }
+
+    await kv.hset('videos', { [videoId]: JSON.stringify(newVideo) })
+
+    // 3. Restituisci i dati del blob e del video
+    return NextResponse.json({ success: true, ...blob, videoId })
+
   } catch (error) {
-    console.error('Errore durante il salvataggio del video:', error)
+    console.error('Errore durante l\'upload:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Errore sconosciuto'
     return NextResponse.json(
-      { error: 'Errore durante il salvataggio del video' },
+      { error: 'Errore durante il salvataggio del video', details: errorMessage },
       { status: 500 }
     )
   }

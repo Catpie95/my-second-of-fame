@@ -1,307 +1,216 @@
 'use client'
 
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, ChangeEvent, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
 
-interface ProgressEvent {
-  loaded: number
-  total?: number
-}
-
-interface ScheduleSettings {
+interface Schedule {
   days: string[]
   startTime: string
   endTime: string
   timezone: string
 }
 
+interface UploadResponse {
+  url: string
+}
+
+const daysOfWeek = [
+  { id: 'Mon', name: 'Lunedì' },
+  { id: 'Tue', name: 'Martedì' },
+  { id: 'Wed', name: 'Mercoledì' },
+  { id: 'Thu', name: 'Giovedì' },
+  { id: 'Fri', name: 'Venerdì' },
+  { id: 'Sat', name: 'Sabato' },
+  { id: 'Sun', name: 'Domenica' },
+]
+
 export default function UploadPage() {
-  const router = useRouter()
-  const [videoDuration, setVideoDuration] = useState(0)
-  const [showPaymentTest, setShowPaymentTest] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [videoFile, setVideoFile] = useState<File | null>(null)
+  const [videoDuration, setVideoDuration] = useState<number>(0)
   const [isUploading, setIsUploading] = useState(false)
-  const [schedule, setSchedule] = useState<ScheduleSettings>({
+  const [uploadMessage, setUploadMessage] = useState('')
+  const [price, setPrice] = useState(0)
+  const [uploadProgress, setUploadProgress] = useState(0)
+
+  const router = useRouter()
+
+  const [schedule, setSchedule] = useState<Schedule>({
     days: [],
     startTime: '09:00',
-    endTime: '18:00',
-    timezone: 'Europe/Rome'
+    endTime: '17:00',
+    timezone: 'Europe/Rome',
   })
+
   const videoRef = useRef<HTMLVideoElement>(null)
 
-  const daysOfWeek = [
-    { value: 'monday', label: 'Lunedì' },
-    { value: 'tuesday', label: 'Martedì' },
-    { value: 'wednesday', label: 'Mercoledì' },
-    { value: 'thursday', label: 'Giovedì' },
-    { value: 'friday', label: 'Venerdì' },
-    { value: 'saturday', label: 'Sabato' },
-    { value: 'sunday', label: 'Domenica' }
-  ]
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
-      if (file.size > 100 * 1024 * 1024) {
-        alert('Il file è troppo grande. Massimo 100MB.')
-        return
+      setVideoFile(file)
+      const url = URL.createObjectURL(file)
+      if (videoRef.current) {
+        videoRef.current.src = url
       }
-
-      setSelectedFile(file)
-      const video = document.createElement('video')
-      video.preload = 'metadata'
-      video.onloadedmetadata = () => {
-        setVideoDuration(Math.ceil(video.duration))
-      }
-      video.src = URL.createObjectURL(file)
     }
   }
 
-  const handleDayToggle = (day: string) => {
-    setSchedule(prev => ({
-      ...prev,
-      days: prev.days.includes(day)
-        ? prev.days.filter(d => d !== day)
-        : [...prev.days, day]
-    }))
+  const handleLoadedMetadata = () => {
+    if (videoRef.current) {
+      const duration = videoRef.current.duration
+      setVideoDuration(duration)
+      calculatePrice(duration, schedule.days.length)
+    }
   }
 
-  const calculatePrice = () => {
-    const basePrice = videoDuration // €1/secondo
-    const daysMultiplier = schedule.days.length
-    const timeRange = 24 // Per ora calcoliamo su 24h, poi implementeremo il calcolo reale
-    const timeMultiplier = timeRange / 24
-    
-    return Math.ceil(basePrice * daysMultiplier * timeMultiplier)
+  const handleDayToggle = (dayId: string) => {
+    const newDays = schedule.days.includes(dayId)
+      ? schedule.days.filter((d) => d !== dayId)
+      : [...schedule.days, dayId]
+    setSchedule({ ...schedule, days: newDays })
+    calculatePrice(videoDuration, newDays.length)
   }
 
-  const uploadVideo = async () => {
-    if (!selectedFile) return
+  const calculatePrice = (duration: number, numDays: number) => {
+    const calculatedPrice = duration * 0.5 * numDays
+    setPrice(calculatedPrice)
+  }
+
+  const handleUpload = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!videoFile || isUploading) return
 
     setIsUploading(true)
-    const formData = new FormData()
-    formData.append('video', selectedFile)
-    formData.append('schedule', JSON.stringify(schedule))
+    setUploadProgress(0)
+    setUploadMessage('Preparazione per l\'upload...')
+
+    const scheduleQueryParam = encodeURIComponent(JSON.stringify(schedule))
+    const url = `/api/upload?filename=${encodeURIComponent(
+      videoFile.name
+    )}&schedule=${scheduleQueryParam}`
+
+    const progressInterval = setInterval(() => {
+      setUploadProgress((prev) => {
+        if (prev >= 95) {
+          clearInterval(progressInterval)
+          return 95
+        }
+        return prev + 5
+      })
+    }, 200)
 
     try {
-      // Simula l'upload con XMLHttpRequest per avere il progress
-      return new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest()
-        
-        xhr.upload.onprogress = (event: ProgressEvent) => {
-          if (event.total) {
-            const progress = (event.loaded / event.total) * 100
-            setUploadProgress(Math.round(progress))
-          }
-        }
-
-        xhr.onload = async () => {
-          if (xhr.status === 200) {
-            const data = JSON.parse(xhr.responseText)
-            console.log('Video caricato:', data)
-            resolve(data)
-          } else {
-            reject(new Error('Errore durante il caricamento'))
-          }
-        }
-
-        xhr.onerror = () => {
-          reject(new Error('Errore di rete'))
-        }
-
-        xhr.open('POST', '/api/upload')
-        xhr.send(formData)
+      const response = await fetch(url, {
+        method: 'POST',
+        body: videoFile,
       })
-    } catch (error) {
-      console.error('Errore upload:', error)
-      alert('Errore durante il caricamento. Riprova.')
-      setIsUploading(false)
-      return null
-    }
-  }
 
-  const handleTestPayment = async () => {
-    if (schedule.days.length === 0) {
-      alert('Seleziona almeno un giorno per la programmazione')
-      return
-    }
+      clearInterval(progressInterval)
+      setUploadProgress(100)
 
-    setShowPaymentTest(true)
-    
-    // Prima carica il video
-    if (selectedFile) {
-      const uploadResult = await uploadVideo()
-      if (!uploadResult) {
-        setShowPaymentTest(false)
-        return
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Errore durante l\'upload')
       }
+
+      const newBlob = (await response.json()) as UploadResponse
+      setUploadMessage(`Upload completato! Il tuo video è online.`)
+      
+      setTimeout(() => {
+        router.push('/?upload_success=true')
+      }, 2000)
+
+    } catch (error) {
+      clearInterval(progressInterval)
+      const errorMessage = error instanceof Error ? error.message : 'Errore sconosciuto'
+      setUploadMessage(`Errore: ${errorMessage}`)
+      setIsUploading(false)
+      setUploadProgress(0)
     }
-
-    // Simula il pagamento
-    setTimeout(() => {
-      router.push('/?success=true')
-    }, 2000)
   }
-
-  const totalPrice = calculatePrice()
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center p-4">
-      {/* Bottone per tornare alla home */}
-      <button
-        onClick={() => router.push('/')}
-        className="absolute top-4 left-4 w-12 h-12 rounded-full bg-black/20 hover:bg-black/40 backdrop-blur-sm flex items-center justify-center transition-all duration-300 border border-white/10"
-      >
-        <span className="text-2xl opacity-60 hover:opacity-100">←</span>
-      </button>
+    <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
+      <video ref={videoRef} onLoadedMetadata={handleLoadedMetadata} className="hidden" />
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-2xl space-y-6"
-      >
-        {/* Area Upload */}
-        <div className="relative border-2 border-dashed border-white/10 rounded-2xl p-8 text-center hover:border-white/20 transition-colors">
-          <input
-            type="file"
-            onChange={handleFileChange}
-            accept="video/*"
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-            disabled={isUploading}
-          />
-          <div className="pointer-events-none">
-            <span className="text-6xl mb-6 block opacity-60">📹</span>
-            <p className="text-white/60 text-sm">
-              MP4, WebM • Max 100MB
-            </p>
-            {selectedFile && (
-              <p className="text-white/80 mt-4">
-                File selezionato: {selectedFile.name}
+      <div className="w-full max-w-2xl mx-auto glass-effect p-8 rounded-lg shadow-2xl fame-glow">
+        <h1 className="text-4xl font-bold text-center mb-2 text-gradient">
+          Carica il Tuo Secondo di Fama
+        </h1>
+        <p className="text-center text-gray-300 mb-8">
+          Programma la messa in onda del tuo video e diventa una star.
+        </p>
+
+        <form onSubmit={handleUpload} className="space-y-6">
+          <div>
+            <label htmlFor="video-upload" className="block text-lg font-medium mb-2">
+              1. Scegli il tuo video
+            </label>
+            <input
+              id="video-upload"
+              type="file"
+              accept="video/mp4,video/quicktime"
+              onChange={handleFileChange}
+              className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-fame-500 file:text-white hover:file:bg-fame-600"
+              required
+            />
+            {videoDuration > 0 && (
+              <p className="text-sm text-gray-400 mt-2">
+                Durata del video: {videoDuration.toFixed(2)} secondi.
               </p>
             )}
           </div>
-        </div>
 
-        {/* Progress Upload */}
-        {isUploading && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="bg-white/5 rounded-xl p-4"
-          >
-            <div className="flex justify-between text-sm text-white/60 mb-2">
-              <span>Caricamento in corso...</span>
-              <span>{uploadProgress}%</span>
+          <div>
+            <h2 className="text-lg font-medium mb-2">2. Programma la Messa in Onda</h2>
+            <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 mb-4">
+              {daysOfWeek.map((day) => (
+                <button
+                  key={day.id}
+                  type="button"
+                  onClick={() => handleDayToggle(day.id)}
+                  className={`py-2 px-1 text-xs sm:text-sm rounded-md transition-all duration-200 ${
+                    schedule.days.includes(day.id)
+                      ? 'bg-fame-500 text-white fame-glow'
+                      : 'bg-white/10 hover:bg-white/20'
+                  }`}
+                >
+                  {day.name}
+                </button>
+              ))}
             </div>
-            <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-primary-500 transition-all duration-300"
-                style={{ width: `${uploadProgress}%` }}
-              />
-            </div>
-          </motion.div>
-        )}
+          </div>
 
-        {/* Programmazione Video */}
-        {videoDuration > 0 && !showPaymentTest && !isUploading && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="bg-white/5 rounded-2xl p-6"
-          >
-            <h3 className="text-xl font-medium mb-4">📅 Programmazione Video</h3>
-            
-            {/* Selezione Giorni */}
-            <div className="mb-6">
-              <p className="text-white/60 mb-3">Seleziona i giorni di visualizzazione:</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                {daysOfWeek.map(day => (
-                  <button
-                    key={day.value}
-                    onClick={() => handleDayToggle(day.value)}
-                    className={`p-3 rounded-lg text-sm font-medium transition-colors ${
-                      schedule.days.includes(day.value)
-                        ? 'bg-white/20 text-white'
-                        : 'bg-white/5 text-white/60 hover:bg-white/10'
-                    }`}
-                  >
-                    {day.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Selezione Orari */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <div>
-                <label className="block text-white/60 text-sm mb-2">Orario di inizio</label>
-                <input
-                  type="time"
-                  value={schedule.startTime}
-                  onChange={(e) => setSchedule(prev => ({ ...prev, startTime: e.target.value }))}
-                  className="w-full p-3 bg-white/5 border border-white/10 rounded-lg text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-white/60 text-sm mb-2">Orario di fine</label>
-                <input
-                  type="time"
-                  value={schedule.endTime}
-                  onChange={(e) => setSchedule(prev => ({ ...prev, endTime: e.target.value }))}
-                  className="w-full p-3 bg-white/5 border border-white/10 rounded-lg text-white"
-                />
-              </div>
-            </div>
-
-            {/* Riepilogo Costi */}
-            <div className="space-y-3 border-t border-white/10 pt-4">
-              <div className="flex justify-between text-white/60">
-                <span>Durata video</span>
-                <span>{videoDuration} secondi</span>
-              </div>
-              <div className="flex justify-between text-white/60">
-                <span>Giorni selezionati</span>
-                <span>{schedule.days.length} giorni</span>
-              </div>
-              <div className="flex justify-between text-white/60">
-                <span>Fascia oraria</span>
-                <span>{schedule.startTime} - {schedule.endTime}</span>
-              </div>
-              <div className="flex justify-between text-xl font-medium border-t border-white/10 pt-3">
-                <span>Totale</span>
-                <span>€{totalPrice}</span>
-              </div>
-              <button 
-                onClick={handleTestPayment}
-                disabled={schedule.days.length === 0}
-                className="w-full mt-4 py-3 bg-white/10 hover:bg-white/20 disabled:bg-white/5 disabled:text-white/40 rounded-xl font-medium transition-colors"
-              >
-                Procedi al Pagamento
-              </button>
-              <p className="text-center text-white/40 text-sm mt-2">
-                (Modalità Test)
-              </p>
-            </div>
-          </motion.div>
-        )}
-
-        {/* Test Payment UI */}
-        {showPaymentTest && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="bg-white/5 rounded-2xl p-6 text-center"
-          >
-            <div className="animate-spin h-8 w-8 border-2 border-white/20 border-t-white rounded-full mx-auto mb-4"></div>
-            <p className="text-white/60">Simulazione Pagamento in corso...</p>
-            <p className="text-white/40 text-sm mt-2">
-              (Verrai reindirizzato automaticamente)
+          <div className="text-center bg-white/5 p-4 rounded-lg">
+            <h3 className="text-xl font-semibold">Costo Totale</h3>
+            <p className="text-3xl font-bold text-gradient animate-pulse">
+              €{price.toFixed(2)}
             </p>
-          </motion.div>
-        )}
-      </motion.div>
+          </div>
+
+          <div>
+            <button
+              type="submit"
+              disabled={isUploading || !videoFile || schedule.days.length === 0}
+              className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
+            >
+              {isUploading ? 'Caricamento...' : 'Paga e Carica'}
+            </button>
+            {(isUploading || uploadMessage) && (
+              <div className="mt-4">
+                {isUploading && (
+                   <div className="w-full bg-gray-700 rounded-full h-2.5">
+                     <div
+                       className="bg-fame-500 h-2.5 rounded-full transition-all duration-300"
+                       style={{ width: `${uploadProgress}%` }}
+                     ></div>
+                   </div>
+                )}
+                <p className="text-center mt-2 text-sm">{uploadMessage}</p>
+              </div>
+            )}
+          </div>
+        </form>
+      </div>
     </div>
   )
 } 
