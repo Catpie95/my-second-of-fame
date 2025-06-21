@@ -1,83 +1,52 @@
-import { put } from '@vercel/blob'
-import { kv } from '@vercel/kv'
-import { NextRequest, NextResponse } from 'next/server'
+import { handleUpload, type HandleUploadBody, type BlobResult } from '@vercel/blob/server';
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { NextResponse } from 'next/server';
+import { kv } from '@vercel/kv';
 
-interface VideoData {
-  id: string
-  url: string
-  duration: number
-  uploadedAt: string
-  schedule: {
-    days: string[]
-    startTime: string
-    endTime: string
-    timezone: string
-  }
-  isActive: boolean
-}
-
-export async function POST(request: NextRequest) {
-  const { searchParams } = new URL(request.url)
-  const originalFilename = searchParams.get('filename')
-  const scheduleData = searchParams.get('schedule')
-
-  console.log('Original filename:', originalFilename)
-
-  if (!originalFilename || !request.body) {
-    return NextResponse.json(
-      { error: 'Nome del file o corpo della richiesta mancanti' },
-      { status: 400 }
-    )
-  }
-
-  if (!scheduleData) {
-    return NextResponse.json(
-      { error: 'Dati di programmazione mancanti' },
-      { status: 400 }
-    )
-  }
+export async function POST(request: Request): Promise<NextResponse> {
+  const body = (await request.json()) as HandleUploadBody;
 
   try {
-    const schedule = JSON.parse(scheduleData)
-    
-    // Genera un nome file ultra-semplice per Vercel Blob
-    const timestamp = Date.now()
-    const randomId = Math.random().toString(36).substring(2, 8)
-    const filename = `video_${timestamp}_${randomId}.mp4`
-    
-    console.log('Generated filename:', filename)
-    console.log('Content-Type:', request.headers.get('content-type'))
-    
-    // 1. Carica il video su Vercel Blob
-    const blob = await put(filename, request.body, {
-      access: 'public',
-      contentType: 'video/mp4',
-    })
+    const jsonResponse = await handleUpload({
+      body,
+      request,
+      onBeforeGenerateToken: async (pathname: string, clientPayload?: string) => {
+        // pathname è il nome del file dal client
+        // clientPayload sono i dati della programmazione (schedule)
+        return {
+          allowedContentTypes: ['video/mp4', 'video/quicktime', 'video/x-m4v'],
+          tokenPayload: clientPayload, // Passa i dati della programmazione a onUploadCompleted
+        };
+      },
+      onUploadCompleted: async ({ blob, tokenPayload }: { blob: BlobResult, tokenPayload: string | null }) => {
+        if (!tokenPayload) {
+          throw new Error('Token payload is missing');
+        }
+        const schedule = JSON.parse(tokenPayload);
 
-    console.log('Blob created successfully:', blob.url)
+        console.log('Upload su Blob completato, salvo su KV:', blob.pathname);
 
-    // 2. Salva i metadati su Vercel KV
-    const videoId = blob.pathname
-    const newVideo: VideoData = {
-      id: videoId,
-      url: blob.url,
-      duration: 0,
-      uploadedAt: new Date().toISOString(),
-      schedule,
-      isActive: true,
-    }
+        const videoId = blob.pathname;
+        const newVideo = {
+          id: videoId,
+          url: blob.url,
+          duration: 0, // Per ora la durata rimane 0
+          uploadedAt: new Date().toISOString(),
+          schedule,
+          isActive: true,
+        };
 
-    await kv.hset('videos', { [videoId]: JSON.stringify(newVideo) })
+        await kv.hset('videos', { [videoId]: JSON.stringify(newVideo) });
+      },
+    });
 
-    // 3. Restituisci i dati del blob e del video
-    return NextResponse.json({ success: true, ...blob, videoId })
-
+    return NextResponse.json(jsonResponse);
   } catch (error) {
-    console.error('Errore durante l\'upload:', error)
-    const errorMessage = error instanceof Error ? error.message : 'Errore sconosciuto'
+    const message = (error as Error).message;
+    console.error('Errore durante la gestione dell\'upload:', message);
     return NextResponse.json(
-      { error: 'Errore durante il salvataggio del video', details: errorMessage },
-      { status: 500 }
-    )
+      { error: `Errore del server: ${message}` },
+      { status: 400 } // L'errore è probabilmente un problema del client
+    );
   }
 } 

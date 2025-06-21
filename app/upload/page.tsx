@@ -3,6 +3,8 @@
 import React, { useState, useRef, ChangeEvent, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { loadStripe } from '@stripe/stripe-js'
+import { put } from '@vercel/blob'
+import type { PutBlobResult } from '@vercel/blob'
 
 interface Schedule {
   days: string[]
@@ -33,6 +35,7 @@ export default function UploadPage() {
   const [uploadMessage, setUploadMessage] = useState('')
   const [price, setPrice] = useState(0)
   const [uploadProgress, setUploadProgress] = useState(0)
+  const blobRef = useRef<PutBlobResult | null>(null)
 
   const router = useRouter()
 
@@ -112,7 +115,6 @@ export default function UploadPage() {
     setIsProcessingPayment(true)
     setUploadMessage('Elaborazione pagamento...')
 
-    // 1. Processa il pagamento
     const paymentSuccess = await processPayment()
     if (!paymentSuccess) {
       setIsProcessingPayment(false)
@@ -121,46 +123,23 @@ export default function UploadPage() {
 
     setIsProcessingPayment(false)
     setIsUploading(true)
-    setUploadProgress(0)
     setUploadMessage('Caricamento video...')
-
-    const scheduleQueryParam = encodeURIComponent(JSON.stringify(schedule))
-    const url = `/api/upload?filename=${encodeURIComponent(
-      videoFile.name
-    )}&schedule=${scheduleQueryParam}`
+    setUploadProgress(0)
 
     const progressInterval = setInterval(() => {
-      setUploadProgress((prev) => {
-        if (prev >= 95) {
-          clearInterval(progressInterval)
-          return 95
-        }
-        return prev + 5
-      })
-    }, 200)
+      setUploadProgress((prev) => Math.min(prev + 5, 95))
+    }, 400)
 
     try {
-      console.log('Uploading file:', videoFile.name, 'Size:', videoFile.size, 'Type:', videoFile.type)
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        body: videoFile,
-        headers: {
-          'Content-Type': videoFile.type || 'video/mp4',
-        },
+      const schedulePayload = encodeURIComponent(JSON.stringify(schedule))
+      const newBlob = await put(`${videoFile.name}?schedule=${schedulePayload}`, videoFile, {
+        access: 'public',
       })
-
+      
       clearInterval(progressInterval)
       setUploadProgress(100)
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        console.error('Upload error response:', errorData)
-        throw new Error(errorData.error || errorData.details || 'Errore durante l\'upload')
-      }
-
-      const newBlob = (await response.json()) as UploadResponse
-      console.log('Upload success:', newBlob)
+      blobRef.current = newBlob
       setUploadMessage(`Upload completato! Il tuo video è online.`)
       
       setTimeout(() => {
@@ -172,8 +151,8 @@ export default function UploadPage() {
       console.error('Upload error:', error)
       const errorMessage = error instanceof Error ? error.message : 'Errore sconosciuto'
       setUploadMessage(`Errore: ${errorMessage}`)
+    } finally {
       setIsUploading(false)
-      setUploadProgress(0)
     }
   }
 
@@ -197,7 +176,7 @@ export default function UploadPage() {
             <input
               id="video-upload"
               type="file"
-              accept="video/mp4,video/quicktime"
+              accept="video/mp4,video/quicktime,video/x-m4v"
               onChange={handleFileChange}
               className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-fame-500 file:text-white hover:file:bg-fame-600"
               required
