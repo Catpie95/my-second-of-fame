@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, ChangeEvent, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { loadStripe } from '@stripe/stripe-js'
 
 interface Schedule {
   days: string[]
@@ -28,6 +29,7 @@ export default function UploadPage() {
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoDuration, setVideoDuration] = useState<number>(0)
   const [isUploading, setIsUploading] = useState(false)
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [uploadMessage, setUploadMessage] = useState('')
   const [price, setPrice] = useState(0)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -75,13 +77,52 @@ export default function UploadPage() {
     setPrice(calculatedPrice)
   }
 
+  const processPayment = async () => {
+    try {
+      const response = await fetch('/api/create-payment-intent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount: price,
+          currency: 'eur',
+        }),
+      })
+
+      const data = await response.json()
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Errore durante il pagamento')
+      }
+
+      console.log('Payment processed:', data.message || 'Pagamento completato')
+      return true
+    } catch (error) {
+      console.error('Payment error:', error)
+      setUploadMessage(`Errore pagamento: ${error instanceof Error ? error.message : 'Errore sconosciuto'}`)
+      return false
+    }
+  }
+
   const handleUpload = async (e: FormEvent) => {
     e.preventDefault()
-    if (!videoFile || isUploading) return
+    if (!videoFile || isUploading || isProcessingPayment) return
 
+    setIsProcessingPayment(true)
+    setUploadMessage('Elaborazione pagamento...')
+
+    // 1. Processa il pagamento
+    const paymentSuccess = await processPayment()
+    if (!paymentSuccess) {
+      setIsProcessingPayment(false)
+      return
+    }
+
+    setIsProcessingPayment(false)
     setIsUploading(true)
     setUploadProgress(0)
-    setUploadMessage('Preparazione per l\'upload...')
+    setUploadMessage('Caricamento video...')
 
     const scheduleQueryParam = encodeURIComponent(JSON.stringify(schedule))
     const url = `/api/upload?filename=${encodeURIComponent(
@@ -193,19 +234,23 @@ export default function UploadPage() {
             <p className="text-3xl font-bold text-gradient animate-pulse">
               €{price.toFixed(2)}
             </p>
+            <p className="text-xs text-gray-400 mt-1">
+              Pagamento simulato (modalità test)
+            </p>
           </div>
 
           <div>
             <button
               type="submit"
-              disabled={isUploading || !videoFile || schedule.days.length === 0}
+              disabled={isUploading || isProcessingPayment || !videoFile || schedule.days.length === 0}
               className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
             >
-              {isUploading ? 'Caricamento...' : 'Paga e Carica'}
+              {isProcessingPayment ? 'Elaborazione Pagamento...' : 
+               isUploading ? 'Caricamento...' : 'Paga e Carica'}
             </button>
-            {(isUploading || uploadMessage) && (
+            {(isUploading || isProcessingPayment || uploadMessage) && (
               <div className="mt-4">
-                {isUploading && (
+                {(isUploading || isProcessingPayment) && (
                    <div className="w-full bg-gray-700 rounded-full h-2.5">
                      <div
                        className="bg-fame-500 h-2.5 rounded-full transition-all duration-300"

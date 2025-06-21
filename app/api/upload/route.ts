@@ -40,14 +40,10 @@ export async function POST(request: NextRequest) {
   try {
     const schedule = JSON.parse(scheduleData)
     
-    // Genera un nome file sicuro per Vercel Blob
+    // Genera un nome file ultra-semplice per Vercel Blob
     const timestamp = Date.now()
-    
-    // Estrai solo l'estensione dal nome originale
-    const extension = originalFilename.split('.').pop()?.toLowerCase() || 'mp4'
-    
-    // Crea un nome file molto semplice e sicuro
-    const filename = `video-${timestamp}.${extension}`
+    const randomId = Math.random().toString(36).substring(2, 8)
+    const filename = `video_${timestamp}_${randomId}.mp4`
     
     console.log('Generated filename:', filename)
     console.log('Content-Type:', request.headers.get('content-type'))
