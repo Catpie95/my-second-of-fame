@@ -99,9 +99,14 @@ export default function UploadPage() {
     }, 200)
 
     try {
+      console.log('Uploading file:', videoFile.name, 'Size:', videoFile.size, 'Type:', videoFile.type)
+      
       const response = await fetch(url, {
         method: 'POST',
         body: videoFile,
+        headers: {
+          'Content-Type': videoFile.type || 'video/mp4',
+        },
       })
 
       clearInterval(progressInterval)
@@ -109,10 +114,12 @@ export default function UploadPage() {
 
       if (!response.ok) {
         const errorData = await response.json()
-        throw new Error(errorData.error || 'Errore durante l\'upload')
+        console.error('Upload error response:', errorData)
+        throw new Error(errorData.error || errorData.details || 'Errore durante l\'upload')
       }
 
       const newBlob = (await response.json()) as UploadResponse
+      console.log('Upload success:', newBlob)
       setUploadMessage(`Upload completato! Il tuo video è online.`)
       
       setTimeout(() => {
@@ -121,6 +128,7 @@ export default function UploadPage() {
 
     } catch (error) {
       clearInterval(progressInterval)
+      console.error('Upload error:', error)
       const errorMessage = error instanceof Error ? error.message : 'Errore sconosciuto'
       setUploadMessage(`Errore: ${errorMessage}`)
       setIsUploading(false)
