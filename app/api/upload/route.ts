@@ -18,10 +18,10 @@ interface VideoData {
 
 export async function POST(request: NextRequest) {
   const { searchParams } = new URL(request.url)
-  const filename = searchParams.get('filename')
+  const originalFilename = searchParams.get('filename')
   const scheduleData = searchParams.get('schedule')
 
-  if (!filename || !request.body) {
+  if (!originalFilename || !request.body) {
     return NextResponse.json(
       { error: 'Nome del file o corpo della richiesta mancanti' },
       { status: 400 }
@@ -38,18 +38,27 @@ export async function POST(request: NextRequest) {
   try {
     const schedule = JSON.parse(scheduleData)
     
+    // Genera un nome file sicuro per Vercel Blob
+    const timestamp = Date.now()
+    const safeName = originalFilename
+      .replace(/[^a-zA-Z0-9.-]/g, '_') // Sostituisce caratteri speciali con underscore
+      .replace(/_{2,}/g, '_') // Rimuove underscore multipli
+      .replace(/^_|_$/g, '') // Rimuove underscore all'inizio e alla fine
+    
+    const filename = `${timestamp}-${safeName}`
+    
     // 1. Carica il video su Vercel Blob
     const blob = await put(filename, request.body, {
       access: 'public',
-      contentType: 'video/mp4', // Assicurati che il content-type sia corretto
+      contentType: 'video/mp4',
     })
 
     // 2. Salva i metadati su Vercel KV
     const videoId = blob.pathname
     const newVideo: VideoData = {
       id: videoId,
-      url: blob.url, // Usiamo l'URL restituito da Vercel Blob
-      duration: 0, // La durata andrebbe estratta, per ora la lasciamo a 0
+      url: blob.url,
+      duration: 0,
       uploadedAt: new Date().toISOString(),
       schedule,
       isActive: true,
